@@ -1,0 +1,122 @@
+//@version=6
+indicator("ドル円 手動運用ガイド (A:東京レンジ→ロンドン / B:5時売り)", overlay=true)
+
+tz      = input.string("Asia/Tokyo", "タイムゾーン")
+rS      = input.int(9,  "A レンジ開始時(含む)", minval=0, maxval=23)
+rE      = input.int(16, "A レンジ終了時(含まない)", minval=1, maxval=23)
+eE      = input.int(19, "A エントリー受付終了時(含まない)", minval=1, maxval=24)
+slRatio = input.float(0.5, "A 損切り(レンジ幅倍)", minval=0.1, step=0.1)
+tpRatio = input.float(0.6, "A 利確(レンジ幅倍)", minval=0.1, step=0.1)
+bH      = input.int(5, "B エントリー時(日本時間)", minval=0, maxval=23)
+bHold   = input.int(1, "B 保有時間(時間)", minval=1, maxval=12)
+bMon    = input.bool(false, "B 月")
+bTue    = input.bool(true,  "B 火")
+bWed    = input.bool(true,  "B 水")
+bThu    = input.bool(true,  "B 木")
+bFri    = input.bool(true,  "B 金")
+
+h        = hour(time, tz)
+d        = dayofweek(time, tz)
+hClose   = hour(time_close, tz)
+dClose   = dayofweek(time_close, tz)
+boundary = hClose != h
+
+// ===== A: 東京レンジ =====
+dayOkA  = d >= dayofweek.monday and d <= dayofweek.friday
+inRange = h >= rS and h < rE
+inEntry = h >= rE and h < eE and dayOkA
+
+var float rH = na
+var float rL = na
+var bool tradedA = false
+
+if inRange and not inRange[1]
+    rH := high
+    rL := low
+    tradedA := false
+else if inRange
+    rH := math.max(rH, high)
+    rL := math.min(rL, low)
+
+longSig  = inEntry and not tradedA and close > rH
+shortSig = inEntry and not tradedA and close < rL
+if longSig or shortSig
+    tradedA := true
+
+R       = rH - rL
+longSL  = rH - R * slRatio
+longTP  = rH + R * tpRatio
+shortSL = rL + R * slRatio
+shortTP = rL - R * tpRatio
+showLv  = h >= rE and not na(R)
+sameSL  = not na(R) and math.abs(longSL - shortSL) < syminfo.mintick
+
+// ===== 線 =====
+plot(rH, "トリガー(買い)=レンジ高値", color = color.new(color.white, 40), style = plot.style_linebr)
+plot(rL, "トリガー(売り)=レンジ安値", color = color.new(color.white, 40), style = plot.style_linebr)
+plot(showLv ? longSL : na, "損切り(買い)", color = color.new(color.red, 20), style = plot.style_linebr)
+plot(showLv and not sameSL ? shortSL : na, "損切り(売り)", color = color.new(color.red, 20), style = plot.style_linebr)
+plot(showLv ? longTP : na, "利確(買い)", color = color.new(color.lime, 20), style = plot.style_linebr)
+plot(showLv ? shortTP : na, "利確(売り)", color = color.new(color.lime, 20), style = plot.style_linebr)
+bgcolor(inRange ? color.new(color.gray, 92) : na)
+bgcolor(inEntry ? color.new(color.blue, 92) : na)
+
+// ===== ラベル(右端に価格つきで表示) =====
+var label lbTrigL = label.new(na, na, "", style = label.style_label_left, color = color.new(color.gray, 20), textcolor = color.white, size = size.small)
+var label lbTrigS = label.new(na, na, "", style = label.style_label_left, color = color.new(color.gray, 20), textcolor = color.white, size = size.small)
+var label lbSlL   = label.new(na, na, "", style = label.style_label_left, color = color.new(color.red, 20), textcolor = color.white, size = size.small)
+var label lbSlS   = label.new(na, na, "", style = label.style_label_left, color = color.new(color.red, 20), textcolor = color.white, size = size.small)
+var label lbTpL   = label.new(na, na, "", style = label.style_label_left, color = color.new(color.green, 20), textcolor = color.white, size = size.small)
+var label lbTpS   = label.new(na, na, "", style = label.style_label_left, color = color.new(color.green, 20), textcolor = color.white, size = size.small)
+
+if barstate.islast and not na(R)
+    x = bar_index + 2
+    label.set_xy(lbTrigL, x, rH)
+    label.set_text(lbTrigL, "買いトリガー " + str.tostring(rH, "#.###"))
+    label.set_xy(lbTrigS, x, rL)
+    label.set_text(lbTrigS, "売りトリガー " + str.tostring(rL, "#.###"))
+    label.set_xy(lbTpL, x, longTP)
+    label.set_text(lbTpL, "買い利確 " + str.tostring(longTP, "#.###"))
+    label.set_xy(lbTpS, x, shortTP)
+    label.set_text(lbTpS, "売り利確 " + str.tostring(shortTP, "#.###"))
+    label.set_xy(lbSlL, x, longSL)
+    label.set_text(lbSlL, (sameSL ? "損切り(買・売共通) " : "買い損切り ") + str.tostring(longSL, "#.###"))
+    label.set_xy(lbSlS, x, shortSL)
+    label.set_text(lbSlS, sameSL ? "" : "売り損切り " + str.tostring(shortSL, "#.###"))
+    label.set_color(lbSlS, sameSL ? na : color.new(color.red, 20))
+
+// ===== B: 5時売り =====
+bDayBar   = (d == dayofweek.monday and bMon) or (d == dayofweek.tuesday and bTue) or (d == dayofweek.wednesday and bWed) or (d == dayofweek.thursday and bThu) or (d == dayofweek.friday and bFri)
+bDayClose = (dClose == dayofweek.monday and bMon) or (dClose == dayofweek.tuesday and bTue) or (dClose == dayofweek.wednesday and bWed) or (dClose == dayofweek.thursday and bThu) or (dClose == dayofweek.friday and bFri)
+bExitH    = (bH + bHold) % 24
+
+bEntryAlert = boundary and hClose == bH and bDayClose
+bExitAlert  = boundary and hClose == bExitH and bDayClose
+bgcolor(bDayBar and (h - bH + 24) % 24 < bHold ? color.new(color.yellow, 88) : na)
+
+// ===== 一覧表 =====
+var table t = table.new(position.bottom_right, 3, 5, border_width = 1)
+if barstate.islast and not na(R)
+    rngPips = R / (syminfo.mintick * 10)
+    table.cell(t, 0, 0, "直近のレンジ", text_color = color.white, bgcolor = color.new(color.gray, 30), text_size = size.small)
+    table.cell(t, 1, 0, "買い", text_color = color.white, bgcolor = color.new(color.gray, 30), text_size = size.small)
+    table.cell(t, 2, 0, "売り", text_color = color.white, bgcolor = color.new(color.gray, 30), text_size = size.small)
+    table.cell(t, 0, 1, "トリガー(終値)", text_color = color.white, bgcolor = color.new(color.gray, 30), text_size = size.small)
+    table.cell(t, 1, 1, "> " + str.tostring(rH, "#.###"), text_color = color.white, bgcolor = color.new(color.black, 20), text_size = size.small)
+    table.cell(t, 2, 1, "< " + str.tostring(rL, "#.###"), text_color = color.white, bgcolor = color.new(color.black, 20), text_size = size.small)
+    table.cell(t, 0, 2, "損切り", text_color = color.white, bgcolor = color.new(color.gray, 30), text_size = size.small)
+    table.cell(t, 1, 2, str.tostring(longSL, "#.###"), text_color = color.white, bgcolor = color.new(color.black, 20), text_size = size.small)
+    table.cell(t, 2, 2, str.tostring(shortSL, "#.###"), text_color = color.white, bgcolor = color.new(color.black, 20), text_size = size.small)
+    table.cell(t, 0, 3, "利確", text_color = color.white, bgcolor = color.new(color.gray, 30), text_size = size.small)
+    table.cell(t, 1, 3, str.tostring(longTP, "#.###"), text_color = color.white, bgcolor = color.new(color.black, 20), text_size = size.small)
+    table.cell(t, 2, 3, str.tostring(shortTP, "#.###"), text_color = color.white, bgcolor = color.new(color.black, 20), text_size = size.small)
+    table.cell(t, 0, 4, "レンジ幅", text_color = color.white, bgcolor = color.new(color.gray, 30), text_size = size.small)
+    table.cell(t, 1, 4, str.tostring(rngPips, "#.#") + " pips", text_color = color.white, bgcolor = color.new(color.black, 20), text_size = size.small)
+    table.cell(t, 2, 4, "", bgcolor = color.new(color.black, 20), text_size = size.small)
+
+// ===== アラート =====
+alertcondition(longSig,     "A 買い(レンジ上抜け)",  "ドル円A: 東京レンジ上抜け → 買い")
+alertcondition(shortSig,    "A 売り(レンジ下抜け)",  "ドル円A: 東京レンジ下抜け → 売り")
+alertcondition(bEntryAlert, "B 売りエントリー",      "ドル円B: 5時 → 売り")
+alertcondition(bExitAlert,  "B 決済",                "ドル円B: 6時 → 決済")
+alertcondition(boundary and hClose == 0, "A 時間決済の確認(0時)", "ドル円A: 0時 → 残っていれば決済")
